@@ -1,0 +1,45 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"   # weekly, to catch changes in new server releases
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Throwaway certificate
+        run: |
+          mkdir -p "$RUNNER_TEMP/cert"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=example.com \
+            -keyout "$RUNNER_TEMP/cert/privkey.pem" -out "$RUNNER_TEMP/cert/fullchain.pem"
+
+      - name: nginx (stable)
+        run: docker run --rm -v "$PWD:/w:ro" -v "$RUNNER_TEMP/cert:/cert:ro" -e CERT_DIR=/cert nginx:stable sh /w/test/nginx.sh
+
+      - name: nginx (mainline)
+        run: docker run --rm -v "$PWD:/w:ro" -v "$RUNNER_TEMP/cert:/cert:ro" -e CERT_DIR=/cert nginx:mainline sh /w/test/nginx.sh
+
+      - name: Caddy 2
+        run: docker run --rm -v "$PWD:/w:ro" caddy:2 caddy validate --config /w/caddy/Caddyfile --adapter caddyfile
+
+      - name: Apache httpd 2.4
+        run: docker run --rm -v "$PWD:/w:ro" -v "$RUNNER_TEMP/cert:/cert:ro" -e CERT_DIR=/cert httpd:2.4 sh /w/test/apache.sh
+
+      - name: HAProxy (LTS)
+        run: docker run --rm -v "$PWD/haproxy:/usr/local/etc/haproxy:ro" -v "$PWD/haproxy/trusted-proxies.lst:/etc/haproxy/trusted-proxies.lst:ro" haproxy:lts haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+
+      - name: nftables
+        run: |
+          sudo apt-get install -y -q nftables >/dev/null
+          sudo nft -c -f firewall/origin-lock.nft
+
+      - name: Shell scripts
+        run: bash -n scripts/update-ranges.sh && sh -n test/nginx.sh && sh -n test/apache.sh
