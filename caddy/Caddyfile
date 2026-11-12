@@ -1,0 +1,33 @@
+# Caddy behind a reverse proxy or CDN (Caddy 2.8 or newer).
+# Replace example.com, the ranges and the upstream address.
+{
+	servers {
+		# Trust X-Forwarded-For only from these addresses (documentation examples:
+		# replace them with your provider's list).
+		trusted_proxies static 192.0.2.0/24 2001:db8::/32
+		client_ip_headers X-Forwarded-For
+		# Read the header from the right and stop at the first untrusted address.
+		trusted_proxies_strict
+	}
+}
+
+example.com {
+	encode zstd gzip
+
+	# Add includeSubDomains and preload only when every subdomain serves HTTPS.
+	header Strict-Transport-Security "max-age=31536000"
+
+	@static path *.css *.js *.mjs *.woff *.woff2 *.png *.jpg *.jpeg *.gif *.svg *.webp *.avif *.ico
+	header @static Cache-Control "public, max-age=2592000"
+
+	respond /healthz "ok" 200
+
+	# Caddy sets X-Forwarded-For and X-Forwarded-Proto for the application and
+	# keeps the incoming chain only from trusted_proxies.
+	reverse_proxy 127.0.0.1:3000
+
+	# The access log's client_ip field holds the visitor, remote_ip the proxy.
+	log {
+		output file /var/log/caddy/example.com.access.log
+	}
+}
